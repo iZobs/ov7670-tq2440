@@ -180,7 +180,7 @@ regs[] = {
  */
 	{ REG_CLKRC, 0x1 },	/* OV: clock scale (30 fps) */
 	{ REG_TSLB,  0x04 },	/* OV */
-	{ REG_COM7, 0 },	/* VGA */
+//	{ REG_COM7, 0 },	/* VGA */
 
     /* Mystery scaling numbers */
     { 0x70, 0x80  },{ 0x71, 0x80},
