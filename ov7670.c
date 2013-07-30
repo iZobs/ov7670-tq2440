@@ -285,7 +285,9 @@ int s3c2440_ov7670_init(void)
     #if DEBUG
     printk(DEVICE_NAME"----s3c2440_ov7670_init is called\n");
     #endif
+
     ov7670_init_defual_regs();
+
     printk(DEVICE_NAME"----ov7670 init_defual_regs is done\n");
 
     show_ov7670_product_id();
@@ -1007,7 +1009,9 @@ static irqreturn_t on_camif_irq_p(int irq, void * dev)
 	u32 frame;
 	struct ov7670_camif_dev * pdev;
 	ciprstatus = ioread32(S3C244X_CIPRSTATUS);
+
 	#if DEBUG
+    printk(DEVICE_NAME"----------on camif_irq_p is called\n");
 	printk(DEVICE_NAME"----the S3C244X_CIPRSTATUS is %x\n",ciprstatus);
         #endif
 
@@ -1023,7 +1027,7 @@ static irqreturn_t on_camif_irq_p(int irq, void * dev)
 	frame = (ciprstatus&(3<<26))>>26;
 	frame = (frame+4-1)%4;
 
-		img_buff[frame].state = CAMIF_BUFF_RGB565;
+	img_buff[frame].state = CAMIF_BUFF_RGB565;
 
 	if (pdev->cmdcode & CAMIF_CMD_STOP)
 	{
@@ -1159,6 +1163,7 @@ static int start_capture(struct ov7670_camif_dev * pdev, int stream)
 		|(1<<14)		// Clear the overflow indication flag of input CODEC FIFO Cr
 		|(1<<13)		// Clear the overflow indication flag of input PREVIEW FIFO Cb
 		|(1<<12);		// Clear the overflow indication flag of input PREVIEW FIFO Cr
+
 	iowrite32(ciwdofst, S3C244X_CIWDOFST);
 	mdelay(1);
 
@@ -1341,10 +1346,10 @@ static int __init camif_init(void)
 	}
 
 	init_sccb();
-
 	hw_reset_camif();
 
-	s3c2440_ov7670_init();
+    has_ov7670 = s3c2440_ov7670_init() >= 0;
+
 	s3c2410_gpio_setpin(S3C2410_GPG4, 1);
 
 	return 0;
@@ -1352,6 +1357,7 @@ static int __init camif_init(void)
 	#if DEBUG
 	printk(KERN_ALERT"ov7670 camif init done\n");
 	#endif
+
 error4:
         misc_deregister(&misc);
  	#if DEBUG
@@ -1384,7 +1390,7 @@ error1:
  */
 static void __exit camif_cleanup(void)
 {
-        struct ov7670_camif_dev *pdev;
+    struct ov7670_camif_dev *pdev;
 
 	CFG_READ(SIO_C);
 	CFG_READ(SIO_D);
