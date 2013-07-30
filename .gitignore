@@ -1,2 +1,2 @@
 #ingore .mod.c .mod.o .o .symvers .order file
-*.mod.o *.order
+*.mod.o *.order *.mod.c *.symvers 
