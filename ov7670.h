@@ -166,7 +166,7 @@
 DECLARE_MUTEX(regs_mutex);
 
 static DECLARE_MUTEX(bus_lock);
-static struct ov9650_reg
+static struct ov7670_reg
 {
 	u8 subaddr;
 	u8 value;
@@ -185,13 +185,17 @@ regs[] = {
 	 * Set the hardware window.  These values from OV don't entirely
 	 * make sense - hstop is less than hstart.  But they work...
 	 */
+	/*
 	{ REG_HSTART, 0x13 },	{ REG_HSTOP, 0x01 },
 	{ REG_HREF, 0xb6 },	{ REG_VSTART, 0x02 },
 	{ REG_VSTOP, 0x7a },	{ REG_VREF, 0x0a },
 
+
 	{ REG_COM3, 0 },	{ REG_COM14, 0 },
+	*/
 	/* Mystery scaling numbers */
 	{ 0x70, 0x3a },		{ 0x71, 0x35 },
+	{ 0x70, 0x80 },		{ 0x71, 0x80 },
 	{ 0x72, 0x11 },		{ 0x73, 0xf0 },
 	{ 0xa2, 0x02 },		{ REG_COM10, 0x0 },
 
@@ -250,6 +254,9 @@ regs[] = {
 	{ REG_RED, 0x60 },
 	{ REG_COM8, COM8_FASTAEC|COM8_AECSTEP|COM8_BFILT|COM8_AGC|COM8_AEC|COM8_AWB },
 
+
+
+
 	/* Matrix coefficients */
 	{ 0x4f, 0x80 },		{ 0x50, 0x80 },
 	{ 0x51, 0 },		{ 0x52, 0x22 },
@@ -271,6 +278,21 @@ regs[] = {
 	{ 0x9d, 0x4c },		{ 0x9e, 0x3f },
 	{ 0x78, 0x04 },
 
+	/*ov7670_fmt_yuv422*/
+	{ REG_COM7, 0x0 },  /* Selects YUV mode */
+	{ REG_RGB444, 0 },	/* No RGB444 please */
+	{ REG_COM1, 0 },
+	{ REG_COM15, COM15_R00FF },
+	{ REG_COM9, 0x18 }, /* 4x gain ceiling; 0x8 is reserved bit */
+	{ 0x4f, 0x80 }, 	/* "matrix coefficient 1" */
+	{ 0x50, 0x80 }, 	/* "matrix coefficient 2" */
+	{ 0x51, 0    },		/* vb */
+	{ 0x52, 0x22 }, 	/* "matrix coefficient 4" */
+	{ 0x53, 0x5e }, 	/* "matrix coefficient 5" */
+	{ 0x54, 0x80 }, 	/* "matrix coefficient 6" */
+	{ REG_COM13, COM13_GAMMA|COM13_UVSAT },
+
+
 	/* Extra-weird stuff.  Some sort of multiplexor register */
 	{ 0x79, 0x01 },		{ 0xc8, 0xf0 },
 	{ 0x79, 0x0f },		{ 0xc8, 0x00 },
@@ -284,14 +306,13 @@ regs[] = {
 	{ 0x79, 0x03 },		{ 0xc8, 0x40 },
 	{ 0x79, 0x05 },		{ 0xc8, 0x30 },
 	{ 0x79, 0x26 },
+
 	{ 0xff, 0xff },	/* END MARKER */
+
 };
 
 
 /*-------------------------------------------------*/
-
-
-
 /*
  * Basic window sizes.  These probably belong somewhere more globally
  * useful.
@@ -370,13 +391,13 @@ static struct ov7670_win_size {
 
 #define MIN_C_WIDTH		32
 #define MIN_C_HEIGHT		48
-#define MAX_C_WIDTH		640
-#define MAX_C_HEIGHT		480
+#define MAX_C_WIDTH		1280
+#define MAX_C_HEIGHT		1024
 
 #define MIN_P_WIDTH		32
 #define MIN_P_HEIGHT		48
-#define MAX_P_WIDTH		640
-#define MAX_P_HEIGHT		480
+#define MAX_P_WIDTH		1280
+#define MAX_P_HEIGHT		1024
 
 enum
 {
@@ -396,6 +417,39 @@ struct ov7670_camif_buffer
 	unsigned int order;
 	unsigned long virt_base;
 	unsigned long phy_base;
+};
+
+/* image buffer for previewing. */
+struct ov7670_camif_buffer img_buff[] =
+{
+	{
+		.state = CAMIF_BUFF_INVALID,
+		.img_size = 0,
+		.order = 0,
+		.virt_base = (unsigned long)NULL,
+		.phy_base = (unsigned long)NULL
+	},
+	{
+		.state = CAMIF_BUFF_INVALID,
+		.img_size = 0,
+		.order = 0,
+		.virt_base = (unsigned long)NULL,
+		.phy_base = (unsigned long)NULL
+	},
+	{
+		.state = CAMIF_BUFF_INVALID,
+		.img_size = 0,
+		.order = 0,
+		.virt_base = (unsigned long)NULL,
+		.phy_base = (unsigned long)NULL
+	},
+	{
+		.state = CAMIF_BUFF_INVALID,
+		.img_size = 0,
+		.order = 0,
+		.virt_base = (unsigned long)NULL,
+		.phy_base = (unsigned long)NULL
+	}
 };
 
 /* for ov7670_camif_dev->state field. */
@@ -424,13 +478,13 @@ enum
 /* main s3c2440 camif structure. */
 struct ov7670_camif_dev
 {
-	/* for sub-devices */
+    /* for sub-devices */
 	struct list_head devlist;
 
 	/* minor device */
 	struct video_device * vfd;
 
-	/* hardware clock. */
+      /*hardware clock. */
 	struct clk * clk;
 
 	/* reference count. */

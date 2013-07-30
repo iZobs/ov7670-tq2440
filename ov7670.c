@@ -263,15 +263,13 @@ static int ov7670_set_hw(int hstart, int hstop,
 }
 
 
-
-
 /*sccb_init*/
 static void __inline__ init_sccb(void)
 {
 
 //	sccb_init();
-	CFG_WRITE(SIO_C);
-	CFG_WRITE(SIO_D);
+        CFG_WRITE(SIO_C);
+        CFG_WRITE(SIO_D);
 
 	High(SIO_C);
 	High(SIO_D);
@@ -282,15 +280,851 @@ static void __inline__ init_sccb(void)
 	#endif
 }
 
+int s3c2440_ov7670_init(void)
+{
+    #if DEBUG
+    printk(DEVICE_NAME"----s3c2440_ov7670_init is called\n");
+    #endif
+    ov7670_init_defual_regs();
+    printk(DEVICE_NAME"----ov7670 init_defual_regs is done\n");
+
+    show_ov7670_product_id();
+    return 0;
+}
+
+
+/* update CISRCFMT only. */
+static void __inline__ update_source_fmt_regs(struct ov7670_camif_dev * pdev)
+{
+	u32 cisrcfmt;
+
+	cisrcfmt = (1<<31)					// ITU-R BT.601 YCbCr 8-bit mode
+		|(0<<30)				// CB,Cr value offset cntrol for YCbCr
+		|(pdev->srcHsize<<16)	// source image width
+		|(2<<14)				// input order is CbYCrY
+		|(pdev->srcVsize<<0);	// source image height
+
+	iowrite32(cisrcfmt, S3C244X_CISRCFMT);
+	#if DEBUG
+	printk(DEVICE_NAME"----update_source_fmt_regs is done\n");
+	#endif
+}
+
+
+/* calculate main burst size and remained burst size. */
+static void __inline__ calc_burst_size(u32 pixperword,u32 hSize, u32 *mainBurstSize, u32 *remainedBurstSize)
+{
+	u32 tmp;
+
+	tmp = (hSize/pixperword)%16;
+
+	switch(tmp)
+	{
+	case 0:
+		*mainBurstSize = 16;
+		*remainedBurstSize = 16;
+		break;
+	case 4:
+		*mainBurstSize = 16;
+		*remainedBurstSize = 4;
+		break;
+	case 8:
+		*mainBurstSize=16;
+		*remainedBurstSize = 8;
+		break;
+	default:
+	       tmp=(hSize/pixperword)%8;
+		switch(tmp)
+		{
+		case 0:
+			*mainBurstSize = 8;
+			*remainedBurstSize = 8;
+			break;
+		case 4:
+			*mainBurstSize = 8;
+			*remainedBurstSize = 4;
+		default:
+			*mainBurstSize = 4;
+			tmp = (hSize/pixperword)%4;
+			*remainedBurstSize = (tmp)?tmp:4;
+			break;
+		}
+		break;
+	}
+}
+
+
+/* update registers:
+ *	PREVIEW path:
+ *		CIPRCLRSA1 ~ CIPRCLRSA4
+ *		CIPRTRGFMT
+ *		CIPRCTRL
+ *		CIPRSCCTRL
+ *		CIPRTAREA
+ *	CODEC path:
+ *		CICOYSA1 ~ CICOYSA4
+ *		CICOCBSA1 ~ CICOCBSA4
+ *		CICOCRSA1 ~ CICOCRSA4
+ *		CICOTRGFMT
+ *		CICOCTRL
+ *		CICOTAREA
+ */
+static void __inline__ update_target_fmt_regs(struct ov7670_camif_dev * pdev)
+{
+	u32 ciprtrgfmt;
+	u32 ciprctrl;
+	u32 ciprscctrl;
+
+	u32 mainBurstSize, remainedBurstSize;
+
+	/* CIPRCLRSA1 ~ CIPRCLRSA4. */
+        /*RGB frame start address for preview DMA,p-path is RGB*/
+	iowrite32(img_buff[0].phy_base, S3C244X_CIPRCLRSA1);
+	iowrite32(img_buff[1].phy_base, S3C244X_CIPRCLRSA2);
+	iowrite32(img_buff[2].phy_base, S3C244X_CIPRCLRSA3);
+	iowrite32(img_buff[3].phy_base, S3C244X_CIPRCLRSA4);
+
+	/* CIPRTRGFMT. */
+	ciprtrgfmt =	(pdev->preTargetHsize<<16)		// horizontal pixel number of target image
+			|(0<<14)						// don't mirror or rotation.
+			|(pdev->preTargetVsize<<0);	// vertical pixel number of target image
+	iowrite32(ciprtrgfmt, S3C244X_CIPRTRGFMT);
+
+	/* CIPRCTRL. */
+	calc_burst_size(2, pdev->preTargetHsize, &mainBurstSize, &remainedBurstSize);    //2 pixle a word
+	ciprctrl = (mainBurstSize<<19)|(remainedBurstSize<<14);
+	iowrite32(ciprctrl, S3C244X_CIPRCTRL);
+
+	/* CIPRSCCTRL. */
+	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+
+	#if DEBUG
+	printk(DEVICE_NAME"----S3C244X_CIPRSCCTRL in update_target_fmt_regs is %x\n",ciprscctrl);
+	#endif
+
+	ciprscctrl &= 1<<15;	// clear all other info except 'preview scaler start'.
+	ciprscctrl |= 0<<30;	// 16-bits RGB
+	iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);	// 16-bit RGB
+
+	/* CIPRTAREA. */
+	iowrite32(pdev->preTargetHsize * pdev->preTargetVsize, S3C244X_CIPRTAREA);
+	#if DEBUG
+	printk(DEVICE_NAME"----update_target_fmt_regs is done\n");
+	#endif
+}
+
+
+/* update CIWDOFST only. */
+static void __inline__ update_target_wnd_regs(struct ov7670_camif_dev * pdev)
+{
+	u32 ciwdofst;
+	u32 winHorOfst, winVerOfst;
+
+	winHorOfst = (pdev->srcHsize - pdev->wndHsize)>>1;
+	winVerOfst = (pdev->srcVsize - pdev->wndVsize)>>1;
+
+	winHorOfst &= 0xFFFFFFF8;
+	winVerOfst &= 0xFFFFFFF8;
+	if ((winHorOfst == 0)&&(winVerOfst == 0))
+	{
+		ciwdofst = 0;	// disable windows offset.
+	}
+	else
+	{
+		ciwdofst = (1<<31)			// window offset enable
+			|(1<<30)			// clear the overflow ind flag of input CODEC FIFO Y
+			|(winHorOfst<<16)		// windows horizontal offset
+			|(1<<15)			// clear the overflow ind flag of input CODEC FIFO Cb
+			|(1<<14)			// clear the overflow ind flag of input CODEC FIFO Cr
+			|(1<<13)			// clear the overflow ind flag of input PREVIEW FIFO Cb
+			|(1<<12)			// clear the overflow ind flag of input PREVIEW FIFO Cr
+			|(winVerOfst<<0);		// window vertical offset
+	}
+
+	iowrite32(ciwdofst, S3C244X_CIWDOFST);
+	#if DEBUG
+	printk(DEVICE_NAME"----update_target_wnd_regs is done\n");
+	#endif
+}
+
+
+/* calculate prescaler ratio and shift. */
+/*根据datasheet提供的算法*/
+static void __inline__ calc_prescaler_ratio_shift(u32 SrcSize, u32 DstSize, u32 *ratio, u32 *shift)
+{
+	if(SrcSize>=32*DstSize)
+	{
+		*ratio=32;
+		*shift=5;
+	}
+	else if(SrcSize>=16*DstSize)
+	{
+		*ratio=16;
+		*shift=4;
+	}
+	else if(SrcSize>=8*DstSize)
+	{
+		*ratio=8;
+		*shift=3;
+	}
+	else if(SrcSize>=4*DstSize)
+	{
+		*ratio=4;
+		*shift=2;
+	}
+	else if(SrcSize>=2*DstSize)
+	{
+		*ratio=2;
+		*shift=1;
+	}
+	else
+	{
+		*ratio=1;
+		*shift=0;
+	}
+}
+
+
+/* update registers:
+ *	PREVIEW path:
+ *		CIPRSCPRERATIO
+ *		CIPRSCPREDST
+ *		CIPRSCCTRL
+ *	CODEC path:
+ *		CICOSCPRERATIO
+ *		CICOSCPREDST
+ *		CICOSCCTRL
+ */
+static void __inline__ update_target_zoom_regs(struct ov7670_camif_dev * pdev)
+{
+	u32 preHratio, preVratio;
+	u32 Hshift, Vshift;
+	u32 shfactor;
+	u32 preDstWidth, preDstHeight;
+	u32 Hscale, Vscale;
+	u32 mainHratio, mainVratio;
+
+	u32 ciprscpreratio;
+	u32 ciprscpredst;
+	u32 ciprscctrl;
+
+
+	/* CIPRSCPRERATIO. */
+	calc_prescaler_ratio_shift(pdev->wndHsize, pdev->preTargetHsize, &preHratio, &Hshift);
+	calc_prescaler_ratio_shift(pdev->wndVsize, pdev->preTargetVsize, &preVratio, &Vshift);
+
+	shfactor = 10 - (Hshift + Vshift);
+
+	ciprscpreratio =	(shfactor<<28)		// shift factor for preview pre-scaler
+			|(preHratio<<16)		// horizontal ratio of preview pre-scaler
+			|(preVratio<<0);		// vertical ratio of preview pre-scaler
+	iowrite32(ciprscpreratio, S3C244X_CIPRSCPRERATIO);
+
+	/* CIPRSCPREDST. */
+	preDstWidth = pdev->wndHsize / preHratio;
+	preDstHeight = pdev->wndVsize / preVratio;
+	ciprscpredst =	(preDstWidth<<16)		// destination width for preview pre-scaler
+		   	|(preDstHeight<<0);		// destination height for preview pre-scaler
+	iowrite32(ciprscpredst, S3C244X_CIPRSCPREDST);
+
+	/* CIPRSCCTRL. */
+	Hscale = (pdev->wndHsize >= pdev->preTargetHsize)?0:1;
+	Vscale = (pdev->wndVsize >= pdev->preTargetVsize)?0:1;
+	mainHratio = (pdev->wndHsize<<8)/(pdev->preTargetHsize<<Hshift);
+	mainVratio = (pdev->wndVsize<<8)/(pdev->preTargetVsize<<Vshift);
+	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+	#if DEBUG
+	printk(DEVICE_NAME"----S3C244x_CIPRSCCTRL is %x\n",ciprscctrl);
+	#endif
+	ciprscctrl &= (1<<30)|(1<<15);	// keep preview image format (RGB565 or RGB24), and preview scaler start state.
+	ciprscctrl	|= (1<<31)	// this bit should be always 1.
+		|(Hscale<<29)	// horizontal scale up/down.
+		|(Vscale<<28)	// vertical scale up/down.
+		|(mainHratio<<16)	// horizontal scale ratio for preview main-scaler
+		|(mainVratio<<0);	// vertical scale ratio for preview main-scaler
+	iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);
+	#if DEBUG
+	printk(DEVICE_NAME"----update_target_zoom_regs is done\n");
+	#endif
+}
+
+
+
+
+
+/* update camif registers, called only when camif ready, or ISR. */
+static void __inline__ update_camif_regs(struct ov7670_camif_dev * pdev)
+{
+	if (!in_irq())
+	{
+		while(1)	// wait until VSYNC is 'L'
+		{
+			barrier();
+			if ((ioread32(S3C244X_CICOSTATUS)&(1<<28)) == 0)
+			{
+			    printk(DEVICE_NAME"---- vsync is 'L'\n");
+				break;
+			}
+		}
+	}
+
+	/* WARNING: don't change the statement sort below!!! */
+
+	update_source_fmt_regs(pdev);
+	update_target_wnd_regs(pdev);
+	update_target_fmt_regs(pdev);
+	update_target_zoom_regs(pdev);
+
+}
+
+
+/* update camera interface with the new config. */
+static void update_camif_config (struct ov7670_camif_fh * fh, u32 cmdcode)
+{
+	struct ov7670_camif_dev	* pdev;
+	pdev = fh->dev;
+	switch (pdev->state)
+	{
+	    /*in camif_open():
+	      dev->state = CAMIF_STATE_READY;
+	      so in init_camif_config(),this case will be cailled
+	    */
+	case CAMIF_STATE_READY:
+		update_camif_regs(fh->dev);		// config the regs directly.
+		break;
+
+	case CAMIF_STATE_PREVIEWING:
+
+		/* camif is previewing image. */
+
+		disable_irq(IRQ_S3C2440_CAM_P);		// disable cam-preview irq.
+
+		/* source image format. */
+		if (cmdcode & CAMIF_CMD_SFMT)
+		{
+			// ignore it, nothing to do now.
+		}
+
+		/* target image format. */
+		if (cmdcode & CAMIF_CMD_TFMT)
+		{
+				/* change target image format only. */
+				pdev->cmdcode |= CAMIF_CMD_TFMT;
+		}
+
+		/* target image window offset. */
+		if (cmdcode & CAMIF_CMD_WND)
+		{
+			pdev->cmdcode |= CAMIF_CMD_WND;
+		}
+
+		/* target image zoomi & zoomout. */
+		if (cmdcode & CAMIF_CMD_ZOOM)
+		{
+			pdev->cmdcode |= CAMIF_CMD_ZOOM;
+		}
+
+		/* stop previewing. */
+		if (cmdcode & CAMIF_CMD_STOP)
+		{
+			pdev->cmdcode |= CAMIF_CMD_STOP;
+		}
+		enable_irq(IRQ_S3C2440_CAM_P);	// enable cam-preview irq.
+
+		wait_event(pdev->cmdqueue, (pdev->cmdcode==CAMIF_CMD_NONE));	// wait until the ISR completes command.
+		break;
+
+	case CAMIF_STATE_CODECING:
+
+		/* camif is previewing image. */
+
+		disable_irq(IRQ_S3C2440_CAM_C);		// disable cam-codec irq.
+
+		/* source image format. */
+		if (cmdcode & CAMIF_CMD_SFMT)
+		{
+			// ignore it, nothing to do now.
+		}
+
+		/* target image format. */
+		if (cmdcode & CAMIF_CMD_TFMT)
+		{
+				/* change target image format only. */
+				pdev->cmdcode |= CAMIF_CMD_TFMT;
+		}
+
+		/* target image window offset. */
+		if (cmdcode & CAMIF_CMD_WND)
+		{
+			pdev->cmdcode |= CAMIF_CMD_WND;
+		}
+
+		/* target image zoomi & zoomout. */
+		if (cmdcode & CAMIF_CMD_ZOOM)
+		{
+			pdev->cmdcode |= CAMIF_CMD_ZOOM;
+		}
+
+		/* stop previewing. */
+		if (cmdcode & CAMIF_CMD_STOP)
+		{
+			pdev->cmdcode |= CAMIF_CMD_STOP;
+		}
+		enable_irq(IRQ_S3C2440_CAM_C);	// enable cam-codec irq.
+		wait_event(pdev->cmdqueue, (pdev->cmdcode==CAMIF_CMD_NONE));	// wait until the ISR completes command.
+		break;
+
+	default:
+		break;
+	}
+
+
+}
+
+/* config camif when master-open camera.*/
+static void init_camif_config(struct ov7670_camif_fh *fh)
+{
+        struct ov7670_camif_dev *pdev;
+        pdev = fh->dev;
+	pdev->input = 0;	// FIXME, the default input image format, see inputs[] for detail.
+
+	/* the source image size (input from external camera). */
+	pdev->srcHsize = 640;	// FIXME, the OV7670's horizontal output pixels.
+	pdev->srcVsize = 480;	// FIXME, the OV7670's verical output pixels.
+
+	/* the windowed image size. */
+	pdev->wndHsize = 640;
+	pdev->wndVsize = 480;
+
+	/* codec-path target(output) image size. */
+	pdev->coTargetHsize = pdev->wndHsize;
+	pdev->coTargetVsize = pdev->wndVsize;
+
+	/* preview-path target(preview) image size. */
+	pdev->preTargetHsize = 320;
+	pdev->preTargetVsize = 240;
+
+	update_camif_config(fh, CAMIF_CMD_STOP);  //call update_camif_regs()
+}
+
+static void __inline__ invalid_image_buffer(void)
+{
+	img_buff[0].state = CAMIF_BUFF_INVALID;
+	img_buff[1].state = CAMIF_BUFF_INVALID;
+	img_buff[2].state = CAMIF_BUFF_INVALID;
+	img_buff[3].state = CAMIF_BUFF_INVALID;
+}
+
+/* free image buffers (only when the camif is latest close). */
+static void __inline__ free_image_buffer(void)
+{
+	free_pages(img_buff[0].virt_base, img_buff[0].order);
+	free_pages(img_buff[1].virt_base, img_buff[1].order);
+	free_pages(img_buff[2].virt_base, img_buff[2].order);
+	free_pages(img_buff[3].virt_base, img_buff[3].order);
+
+	img_buff[0].order = 0;
+	img_buff[0].virt_base = (unsigned long)NULL;
+	img_buff[0].phy_base = (unsigned long)NULL;
+
+	img_buff[1].order = 0;
+	img_buff[1].virt_base = (unsigned long)NULL;
+	img_buff[1].phy_base = (unsigned long)NULL;
+
+	img_buff[2].order = 0;
+	img_buff[2].virt_base = (unsigned long)NULL;
+	img_buff[2].phy_base = (unsigned long)NULL;
+
+	img_buff[3].order = 0;
+	img_buff[3].virt_base = (unsigned long)NULL;
+	img_buff[3].phy_base = (unsigned long)NULL;
+}
+
+/* init image buffer (only when the camif is first open). */
+static int __inline__ init_image_buffer(void)
+{
+	int size1, size2;
+	unsigned long size;
+	unsigned int order;
+
+	/* size1 is the max image size of codec path. */
+	size1 = MAX_C_WIDTH * MAX_C_HEIGHT * 16 / 8;
+
+	/* size2 is the max image size of preview path. */
+	size2 = MAX_P_WIDTH * MAX_P_HEIGHT * 16 / 8;
+
+	size = (size1 > size2)?size1:size2;
+
+	order = get_order(size);
+	img_buff[0].order = order;
+	img_buff[0].virt_base = __get_free_pages(GFP_KERNEL|GFP_DMA, img_buff[0].order);
+	if (img_buff[0].virt_base == (unsigned long)NULL)
+	{
+		goto error0;
+	}
+	img_buff[0].phy_base = img_buff[0].virt_base - PAGE_OFFSET + PHYS_OFFSET;	// the DMA address.
+	#if DEBUG
+	printk(DEVICE_NAME"----img_buff[0]'s DMA address is %lx\n",img_buff[0].phy_base);
+	#endif
+
+	img_buff[1].order = order;
+	img_buff[1].virt_base = __get_free_pages(GFP_KERNEL|GFP_DMA, img_buff[1].order);
+	if (img_buff[1].virt_base == (unsigned long)NULL)
+	{
+		goto error1;
+	}
+	img_buff[1].phy_base = img_buff[1].virt_base - PAGE_OFFSET + PHYS_OFFSET;	// the DMA address.
+	#if DEBUG
+	printk(DEVICE_NAME"----img_buff[1]'s DMA address is %lx\n",img_buff[1].phy_base);
+	#endif
+
+	img_buff[2].order = order;
+	img_buff[2].virt_base = __get_free_pages(GFP_KERNEL|GFP_DMA, img_buff[2].order);
+	if (img_buff[2].virt_base == (unsigned long)NULL)
+	{
+		goto error2;
+	}
+	img_buff[2].phy_base = img_buff[2].virt_base - PAGE_OFFSET + PHYS_OFFSET;	// the DMA address.
+	#if DEBUG
+	printk(DEVICE_NAME"----img_buff[2]'s DMA address is %lx\n",img_buff[2].phy_base);
+	#endif
+
+
+	img_buff[3].order = order;
+	img_buff[3].virt_base = __get_free_pages(GFP_KERNEL|GFP_DMA, img_buff[3].order);
+	if (img_buff[3].virt_base == (unsigned long)NULL)
+	{
+		goto error3;
+	}
+	img_buff[3].phy_base = img_buff[3].virt_base - PAGE_OFFSET + PHYS_OFFSET;	// the DMA address.
+	#if DEBUG
+	printk(DEVICE_NAME"----img_buff[3]'s DMA address is %lx\n",img_buff[3].phy_base);
+	#endif
+
+
+
+	invalid_image_buffer();
+
+	return 0;
+error3:
+	free_pages(img_buff[2].virt_base, order);
+	img_buff[2].phy_base = (unsigned long)NULL;
+error2:
+	free_pages(img_buff[1].virt_base, order);
+	img_buff[1].phy_base = (unsigned long)NULL;
+error1:
+	free_pages(img_buff[0].virt_base, order);
+	img_buff[0].phy_base = (unsigned long)NULL;
+error0:
+	return -ENOMEM;
+}
+
+/* software reset camera interface. */
+static void __inline__ soft_reset_camif(void)
+{
+	u32 cigctrl;
+
+	cigctrl = (1<<31)|(1<<29);
+	iowrite32(cigctrl, S3C244X_CIGCTRL);
+	mdelay(10);
+
+	cigctrl = (1<<29);
+	iowrite32(cigctrl, S3C244X_CIGCTRL);
+	mdelay(10);
+}
+
+/* software reset camera interface. */
+static void __inline__ hw_reset_camif(void)
+{
+	u32 cigctrl;
+
+	cigctrl = (1<<30)|(1<<29);
+	iowrite32(cigctrl, S3C244X_CIGCTRL);
+	mdelay(10);
+
+	cigctrl = (1<<29);
+	iowrite32(cigctrl, S3C244X_CIGCTRL);
+	mdelay(10);
+
+}
+
+/* switch camif from codec path to preview path. */
+static void __inline__ camif_c2p(struct ov7670_camif_dev * pdev)
+{
+	/* 1. stop codec. */
+	{
+		u32 cicoscctrl;
+		cicoscctrl = ioread32(S3C244X_CICOSCCTRL);
+		cicoscctrl &= ~(1<<15);	// stop preview scaler.
+		iowrite32(cicoscctrl, S3C244X_CICOSCCTRL);
+	}
+
+	/* 2. soft-reset camif. */
+	soft_reset_camif();
+
+	/* 3. clear all overflow. */
+	{
+		u32 ciwdofst;
+		ciwdofst = ioread32(S3C244X_CIWDOFST);
+		ciwdofst |= (1<<30)|(1<<15)|(1<<14)|(1<<13)|(1<<12);
+		iowrite32(ciwdofst, S3C244X_CIWDOFST);
+
+		ciwdofst &= ~((1<<30)|(1<<15)|(1<<14)|(1<<13)|(1<<12));
+		iowrite32(ciwdofst, S3C244X_CIWDOFST);
+	}
+}
+
+/* stop image capture, always called in ISR.
+ *	P-path regs:
+ *		CIPRSCCTRL
+ *		CIPRCTRL
+ *	C-path regs:
+ *		CICOSCCTRL.
+ *		CICOCTRL
+ *	Global regs:
+ *		CIIMGCPT
+ */
+static void stop_capture(struct ov7670_camif_dev * pdev)
+{
+	u32 ciprscctrl;
+	u32 ciprctrl;
+
+	u32 cicoscctrl;
+	u32 cicoctrl;
+
+	switch(pdev->state)
+	{
+	case CAMIF_STATE_PREVIEWING:
+		/* CIPRCTRL. */
+		ciprctrl = ioread32(S3C244X_CIPRCTRL);
+		ciprctrl |= 1<<2;		// enable last IRQ at the end of frame capture.
+		iowrite32(ciprctrl, S3C244X_CIPRCTRL);
+
+		/* CIPRSCCTRL. */
+		ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+		ciprscctrl &= ~(1<<15);		// clear preview scaler start bit.
+		iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);
+
+		/* CIIMGCPT. */
+		iowrite32(0, S3C244X_CIIMGCPT);
+		pdev->state = CAMIF_STATE_READY;
+
+		break;
+
+	case CAMIF_STATE_CODECING:
+		/* CICOCTRL. */
+		cicoctrl = ioread32(S3C244X_CICOCTRL);
+		cicoctrl |= 1<<2;		// enable last IRQ at the end of frame capture.
+		iowrite32(cicoctrl, S3C244X_CICOCTRL);
+
+		/* CICOSCCTRL. */
+		cicoscctrl = ioread32(S3C244X_CICOSCCTRL);
+		cicoscctrl &= ~(1<<15);		// clear codec scaler start bit.
+		iowrite32(cicoscctrl, S3C244X_CICOSCCTRL);
+
+		/* CIIMGCPT. */
+		iowrite32(0, S3C244X_CIIMGCPT);
+		pdev->state = CAMIF_STATE_READY;
+
+		break;
+
+	}
+}
+
+
+/*
+ * ISR: service for C-path interrupt.
+ */
+static irqreturn_t on_camif_irq_c(int irq, void * dev)
+{
+	u32 cicostatus;
+
+	u32 frame;
+	struct ov7670_camif_dev * pdev;
+
+	cicostatus = ioread32(S3C244X_CICOSTATUS);
+	#if DEBUG
+	printk("----on_camif_irq_c is call\n");
+	printk(DEVICE_NAME"----the S3C244X_CICOSTATUS is %x\n",cicostatus);
+        #endif
+
+	/*编码通道图像捕捉是否使能*/
+	if ((cicostatus & (1<<21))== 0)
+	{
+		return IRQ_RETVAL(IRQ_NONE);
+	}
+
+	pdev = (struct ov7670_camif_dev *)dev;
+
+	/* valid img_buff[x] just DMAed. */
+	frame = (cicostatus&(3<<26))>>26;
+	frame = (frame+4-1)%4;
+
+	/*pdev->cmdcode 在update_camif_config()中被赋值*/
+	if (pdev->cmdcode & CAMIF_CMD_STOP)
+	{
+		stop_capture(pdev);
+
+		pdev->state = CAMIF_STATE_READY;
+	}
+	else
+	{
+		if (pdev->cmdcode & CAMIF_CMD_C2P)
+		{
+			camif_c2p(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_WND)
+		{
+			update_target_wnd_regs(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_TFMT)
+		{
+			update_target_fmt_regs(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_ZOOM)
+		{
+			update_target_zoom_regs(pdev);
+		}
+
+		invalid_image_buffer();
+	}
+	pdev->cmdcode = CAMIF_CMD_NONE;
+	wake_up(&pdev->cmdqueue);
+
+	return IRQ_RETVAL(IRQ_HANDLED);
+}
+
+/*
+ * ISR: service for P-path interrupt.
+ */
+static irqreturn_t on_camif_irq_p(int irq, void * dev)
+{
+	u32 ciprstatus;
+
+	u32 frame;
+	struct ov7670_camif_dev * pdev;
+	ciprstatus = ioread32(S3C244X_CIPRSTATUS);
+	#if DEBUG
+	printk(DEVICE_NAME"----the S3C244X_CIPRSTATUS is %x\n",ciprstatus);
+        #endif
+
+
+	if ((ciprstatus & (1<<21))== 0)
+	{
+		return IRQ_RETVAL(IRQ_NONE);
+	}
+
+	pdev = (struct ov7670_camif_dev *)dev;
+
+	/* valid img_buff[x] just DMAed. */
+	frame = (ciprstatus&(3<<26))>>26;
+	frame = (frame+4-1)%4;
+
+		img_buff[frame].state = CAMIF_BUFF_RGB565;
+
+	if (pdev->cmdcode & CAMIF_CMD_STOP)
+	{
+		stop_capture(pdev);
+
+		pdev->state = CAMIF_STATE_READY;
+	}
+	else
+	{
+		if (pdev->cmdcode & CAMIF_CMD_P2C)
+		{
+			camif_c2p(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_WND)
+		{
+			update_target_wnd_regs(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_TFMT)
+		{
+			update_target_fmt_regs(pdev);
+		}
+
+		if (pdev->cmdcode & CAMIF_CMD_ZOOM)
+		{
+			update_target_zoom_regs(pdev);
+		}
+
+		invalid_image_buffer();
+	}
+	pdev->cmdcode = CAMIF_CMD_NONE;
+	wake_up(&pdev->cmdqueue);
+
+	return IRQ_RETVAL(IRQ_HANDLED);
+}
+
+
+
 /*
  * camif_open()
  */
 static int camif_open(struct inode *inode, struct file *file)
 {
-    show_ov7670_product_id();
-    ov7670_reset();
-    ov7670_set_hw(1,1,1,1);
-    return 0;
+       int ret;
+       struct ov7670_camif_dev *pdev;
+       struct ov7670_camif_fh *fh;
+       if(!has_ov7670)
+       {
+	        return -ENODEV;
+       }
+       pdev = &camera;
+
+	fh = kzalloc(sizeof(*fh),GFP_KERNEL); // alloc memory for filehandle
+	if (NULL == fh)
+	{
+		return -ENOMEM;
+	}
+	fh->dev = pdev;
+
+	pdev->state = CAMIF_STATE_READY;
+
+	init_camif_config(fh);
+
+	ret = init_image_buffer();	// init image buffer.
+	if (ret < 0)
+	{
+		goto error1;
+	}
+
+	/*request irq for c-path*/
+        request_irq(IRQ_S3C2440_CAM_C, on_camif_irq_c, IRQF_DISABLED, "CAM_C", pdev);	// setup ISRs
+	if (ret < 0)
+	{
+		goto error2;
+	}
+
+	/*request irq for p-path*/
+	request_irq(IRQ_S3C2440_CAM_P, on_camif_irq_p, IRQF_DISABLED, "CAM_P", pdev);
+	if (ret < 0)
+	{
+		goto error3;
+	}
+
+	clk_enable(pdev->clk);		// and enable camif clock.
+
+
+	soft_reset_camif();
+
+	file->private_data = fh;
+	fh->dev  = pdev;
+	update_camif_config(fh, 0);
+	return 0;
+
+error3:
+	free_irq(IRQ_S3C2440_CAM_C, pdev);
+error2:
+	free_image_buffer();
+error1:
+	kfree(fh);
+	return ret;
 }
 
 
@@ -302,12 +1136,100 @@ static int camif_release(struct inode *inode, struct file *file)
     return 0;
 }
 
+
+/* start image capture.
+ *
+ * param 'stream' means capture pictures streamly or capture only one picture.
+ */
+static int start_capture(struct ov7670_camif_dev * pdev, int stream)
+{
+	int ret;
+
+	u32 ciwdofst;
+	u32 ciprscctrl;
+	u32 ciimgcpt;
+
+	ciwdofst = ioread32(S3C244X_CIWDOFST);
+
+	#if DEBUG
+	printk(DEVICE_NAME"--------the S3C244X_CIWDOFST is %x\n",ciwdofst);
+        #endif
+	ciwdofst	|= (1<<30)	// Clear the overflow indication flag of input CODEC FIFO Y
+		|(1<<15)		// Clear the overflow indication flag of input CODEC FIFO Cb
+		|(1<<14)		// Clear the overflow indication flag of input CODEC FIFO Cr
+		|(1<<13)		// Clear the overflow indication flag of input PREVIEW FIFO Cb
+		|(1<<12);		// Clear the overflow indication flag of input PREVIEW FIFO Cr
+	iowrite32(ciwdofst, S3C244X_CIWDOFST);
+	mdelay(1);
+
+	ciwdofst = ioread32(S3C244X_CIWDOFST);
+        #if DEBUG
+	printk(DEVICE_NAME"----------the S3C244X_CIWDOFST is %x\n",ciwdofst);
+        #endif
+
+	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+        #if DEBUG
+	printk(DEVICE_NAME"--------the S3C244X_CIPRSCCTRL is %x\n",ciprscctrl);
+        #endif
+
+	ciprscctrl |= 1<<15;    	// preview scaler start
+	iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);
+
+	pdev->state = CAMIF_STATE_PREVIEWING;
+
+	ciimgcpt = (1<<31)		// camera interface global capture enable
+		 |(1<<29);		// capture enable for preview scaler.
+	iowrite32(ciimgcpt, S3C244X_CIIMGCPT);
+
+	ret = 0;
+	if (stream == 0)
+	{
+		pdev->cmdcode = CAMIF_CMD_STOP;
+
+		ret = wait_event_interruptible(pdev->cmdqueue, pdev->cmdcode == CAMIF_CMD_NONE);
+	}
+
+	return ret;
+}
+
+
+
+
+
+
 /*
  * camif_read()
  */
 static ssize_t camif_read(struct file *file, char __user *data, size_t count, loff_t *ppos)
 {
-    return 0;
+	int i;
+	struct ov7670_camif_fh * fh;
+	struct ov7670_camif_dev * pdev;
+
+	fh = file->private_data;
+	pdev = fh->dev;
+
+         /*开启stream*/
+	if (start_capture(pdev, 0) != 0)
+	{
+		return -ERESTARTSYS;
+	}
+
+
+	disable_irq(IRQ_S3C2440_CAM_C);
+	disable_irq(IRQ_S3C2440_CAM_P);
+	for (i = 0; i < 4; i++)
+	{
+		if (img_buff[i].state != CAMIF_BUFF_INVALID)
+		{
+		    copy_to_user(data, (void *)img_buff[i].virt_base, count); /*将img_buff的虚拟地址复制到user*/
+			img_buff[i].state = CAMIF_BUFF_INVALID;
+		}
+	}
+	enable_irq(IRQ_S3C2440_CAM_P);
+	enable_irq(IRQ_S3C2440_CAM_C);
+
+	return count;
 }
 
 
@@ -357,6 +1279,10 @@ static int __init camif_init(void)
 	s3c2410_gpio_cfgpin(S3C2440_GPJ12, S3C2440_GPJ12_CAMRESET);
 
 
+    #if DEBUG
+    printk(DEVICE_NAME"----seting gpio-j to camera mode.......\n");
+    #endif
+
 	/* init camera's virtual memory. */
 	if (!request_mem_region((unsigned long)S3C2440_PA_CAMIF, S3C2440_SZ_CAMIF, DEVICE_NAME))
 	{
@@ -366,7 +1292,7 @@ static int __init camif_init(void)
 
 
 	/* remap the virtual memory. */
-	/*内核内存，类型用unsigned long*/
+/*内核内存，类型用unsigned long*/
 	camif_base_addr = (unsigned long)ioremap_nocache((unsigned long)S3C2440_PA_CAMIF, S3C2440_SZ_CAMIF);
 	if (camif_base_addr == (unsigned long)NULL)
 	{
@@ -386,6 +1312,10 @@ static int __init camif_init(void)
 	camif_upll_clk = clk_get(NULL, "camif-upll");
 	clk_set_rate(camif_upll_clk, 24000000);
 	mdelay(100);
+
+    #if DEBUG
+    printk(DEVICE_NAME"----enable the clock and rate it.......\n");
+    #endif
 
 
 	/* init reference counter and its mutex. */
@@ -409,7 +1339,14 @@ static int __init camif_init(void)
 		ret = -EBUSY;
 		goto error4;
 	}
+
 	init_sccb();
+
+	hw_reset_camif();
+
+	s3c2440_ov7670_init();
+	s3c2410_gpio_setpin(S3C2410_GPG4, 1);
+
 	return 0;
 
 	#if DEBUG
@@ -438,7 +1375,7 @@ error1:
 	#if DEBUG
 	printk(CAMIF_INIT_FUNCTION"----mem_region error 1 is called,falied request mem\n");
 	#endif
-
+	return ret;
 }
 
 
