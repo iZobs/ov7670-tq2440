@@ -178,24 +178,18 @@ regs[] = {
  *              2 = 20fps
  *              1 = 30fps
  */
-	{ REG_CLKRC, 0x1 },	/* OV: clock scale (30 fps) */
+	{ REG_CLKRC, 0x01 },	/* OV: clock scale (30 fps) */
 	{ REG_TSLB,  0x04 },	/* OV */
 //	{ REG_COM7, 0 },	/* VGA */
 
     /* Mystery scaling numbers */
-    { 0x70, 0x80  },{ 0x71, 0x80},
+    { 0x70, 0x80},{ 0x71, 0x80},
+    {REG_COM7,0x00},{REG_COM15,0xc0},
     { 0x72, 0x11  },{ 0x73, 0xf0},
     { 0xa2, 0x02  },{ REG_COM10, 0x0 },
+    {REG_COM3,0x00},{0x3a,0x0c},
+    {REG_COM13,0x00},
      
-        /* Gamma curve values */
-    { 0x7a, 0x20  },{ 0x7b, 0x10  },
-    { 0x7c, 0x1e  },{ 0x7d, 0x35  },
-    { 0x7e, 0x5a  },{ 0x7f, 0x69  },
-    { 0x80, 0x76  },{ 0x81, 0x80  },
-    { 0x82, 0x88  },{ 0x83, 0x8f  },
-    { 0x84, 0x96  },{ 0x85, 0xa3  },
-    { 0x86, 0xaf  },{ 0x87, 0xc4  },
-    { 0x88, 0xd7  },{ 0x89, 0xe8  },
 
      { REG_COM7, 0x00 },  /* Selects YUV mode */
      { REG_RGB444, 0  },/* No RGB444 please */
@@ -208,7 +202,8 @@ regs[] = {
      { 0x52, 0x22  },    /* "matrix coefficient 4" */
      { 0x53, 0x5e  },    /* "matrix coefficient 5" */
      { 0x54, 0x80  },    /* "matrix coefficient 6" */
-     { REG_COM13, COM13_GAMMA|COM13_UVSAT},
+   //  { REG_COM13, COM13_GAMMA|COM13_UVSAT},
+
 
    	{ 0xff, 0xff },	/* END MARKER */
 

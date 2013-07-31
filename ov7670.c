@@ -41,10 +41,12 @@
 #define DEVICE_NAME		"ov7670"
 #define CAMIF_INIT_FUNCTION      "In camif_init()"
 
-#define DEBUG 1
+#define DEBUG 0
+#define DEBUG_CAMIF 1
 
 static unsigned has_ov7670;
 unsigned long camif_base_addr;
+static u8 update_cmaif_regs_flag = 0;
 
 /* camera device(s) */
 static struct ov7670_camif_dev camera;
@@ -299,6 +301,12 @@ int s3c2440_ov7670_init(void)
 static void __inline__ update_source_fmt_regs(struct ov7670_camif_dev * pdev)
 {
 	u32 cisrcfmt;
+	u32 recisrcfmt;
+
+	recisrcfmt = ioread32(S3C244X_CISRCFMT);
+       #if DEBUG_CAMIF
+	printk(DEVICE_NAME"--------------before write, S3C244X_CISRCFMT is %x\n",recisrcfmt);
+	#endif
 
 	cisrcfmt = (1<<31)					// ITU-R BT.601 YCbCr 8-bit mode
 		|(0<<30)				// CB,Cr value offset cntrol for YCbCr
@@ -307,8 +315,11 @@ static void __inline__ update_source_fmt_regs(struct ov7670_camif_dev * pdev)
 		|(pdev->srcVsize<<0);	// source image height
 
 	iowrite32(cisrcfmt, S3C244X_CISRCFMT);
-	#if DEBUG
-	printk(DEVICE_NAME"----update_source_fmt_regs is done\n");
+	mdelay(3);
+
+	recisrcfmt = ioread32(S3C244X_CISRCFMT);
+	#if DEBUG_CAMIF
+	printk(DEVICE_NAME"--------------after wirte,the S3C244X_CISRCFMT is %x\n",recisrcfmt);
 	#endif
 }
 
@@ -377,6 +388,9 @@ static void __inline__ update_target_fmt_regs(struct ov7670_camif_dev * pdev)
 	u32 ciprctrl;
 	u32 ciprscctrl;
 
+	u32 reciprtrgfmt;
+	u32 reciprctrl;
+
 	u32 mainBurstSize, remainedBurstSize;
 
 	/* CIPRCLRSA1 ~ CIPRCLRSA4. */
@@ -392,24 +406,50 @@ static void __inline__ update_target_fmt_regs(struct ov7670_camif_dev * pdev)
 			|(pdev->preTargetVsize<<0);	// vertical pixel number of target image
 	iowrite32(ciprtrgfmt, S3C244X_CIPRTRGFMT);
 
+
+	#if DEBUG_CAMIF
+	mdelay(3);
+	reciprtrgfmt = ioread32(S3C244X_CIPRTRGFMT);
+	printk(DEVICE_NAME"--------------the CIPRTRGFMT is %x\n",reciprtrgfmt);
+	#endif
+
+
 	/* CIPRCTRL. */
+	/*RGB 16-bit ,2 pixle/word ,mB=16,rB=16*/
 	calc_burst_size(2, pdev->preTargetHsize, &mainBurstSize, &remainedBurstSize);    //2 pixle a word
 	ciprctrl = (mainBurstSize<<19)|(remainedBurstSize<<14);
+	ciprctrl = ciprctrl|(1<<2);
+
 	iowrite32(ciprctrl, S3C244X_CIPRCTRL);
+
+	#if DEBUG_CAMIF
+	mdelay(3);
+	reciprctrl=ioread32(S3C244X_CIPRCTRL);
+	printk(DEVICE_NAME"--------------the S3C244X_CIPRCTRL is %x\n",reciprctrl);
+	#endif
+
 
 	/* CIPRSCCTRL. */
 	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
 
-	#if DEBUG
-	printk(DEVICE_NAME"----S3C244X_CIPRSCCTRL in update_target_fmt_regs is %x\n",ciprscctrl);
+	#if DEBUG_CAMIF
+	printk(DEVICE_NAME"-------------before write,S3C244X_CIPRSCCTRL, is %x\n",ciprscctrl);
 	#endif
 
+	/* CIPRSCCTRL. */
 	ciprscctrl &= 1<<15;	// clear all other info except 'preview scaler start'.
 	ciprscctrl |= 0<<30;	// 16-bits RGB
 	iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);	// 16-bit RGB
 
+	#if DEBUG_CAMIF
+	mdelay(1);
+	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+	printk(DEVICE_NAME"--------------S3C244X_CIPRSCCTRL is %x\n",ciprscctrl);
+	#endif
+
 	/* CIPRTAREA. */
 	iowrite32(pdev->preTargetHsize * pdev->preTargetVsize, S3C244X_CIPRTAREA);
+
 	#if DEBUG
 	printk(DEVICE_NAME"----update_target_fmt_regs is done\n");
 	#endif
@@ -420,6 +460,7 @@ static void __inline__ update_target_fmt_regs(struct ov7670_camif_dev * pdev)
 static void __inline__ update_target_wnd_regs(struct ov7670_camif_dev * pdev)
 {
 	u32 ciwdofst;
+	u32 reciwdofst;
 	u32 winHorOfst, winVerOfst;
 
 	winHorOfst = (pdev->srcHsize - pdev->wndHsize)>>1;
@@ -444,6 +485,14 @@ static void __inline__ update_target_wnd_regs(struct ov7670_camif_dev * pdev)
 	}
 
 	iowrite32(ciwdofst, S3C244X_CIWDOFST);
+
+	#if DEBUG_CAMIF
+	mdelay(1);
+	reciwdofst = ioread32(S3C244X_CIWDOFST);
+	printk(DEVICE_NAME"------------S3C244X_CIWDOFST is %x\n",reciwdofst);
+	#endif
+
+
 	#if DEBUG
 	printk(DEVICE_NAME"----update_target_wnd_regs is done\n");
 	#endif
@@ -557,6 +606,7 @@ static void __inline__ update_target_zoom_regs(struct ov7670_camif_dev * pdev)
 /* update camif registers, called only when camif ready, or ISR. */
 static void __inline__ update_camif_regs(struct ov7670_camif_dev * pdev)
 {
+
 	if (!in_irq())
 	{
 		while(1)	// wait until VSYNC is 'L'
@@ -577,6 +627,11 @@ static void __inline__ update_camif_regs(struct ov7670_camif_dev * pdev)
 	update_target_fmt_regs(pdev);
 	update_target_zoom_regs(pdev);
 
+        #if DEBUG_CAMIF
+	update_cmaif_regs_flag +=1;
+	printk(DEVICE_NAME"----update_camif_regs call [%d] time\n",update_cmaif_regs_flag);
+	#endif
+
 }
 
 
@@ -584,7 +639,9 @@ static void __inline__ update_camif_regs(struct ov7670_camif_dev * pdev)
 static void update_camif_config (struct ov7670_camif_fh * fh, u32 cmdcode)
 {
 	struct ov7670_camif_dev	* pdev;
+
 	pdev = fh->dev;
+
 	switch (pdev->state)
 	{
 	    /*in camif_open():
@@ -833,6 +890,7 @@ static void __inline__ soft_reset_camif(void)
 	cigctrl = (1<<29);
 	iowrite32(cigctrl, S3C244X_CIGCTRL);
 	mdelay(10);
+
 }
 
 /* software reset camera interface. */
@@ -1348,8 +1406,9 @@ static int __init camif_init(void)
 	init_sccb();
 	hw_reset_camif();
 
-    has_ov7670 = s3c2440_ov7670_init() >= 0;
+        has_ov7670 = s3c2440_ov7670_init() >= 0;
 
+       /*给lcd上电*/
 	s3c2410_gpio_setpin(S3C2410_GPG4, 1);
 
 	return 0;
