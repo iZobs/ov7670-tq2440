@@ -183,7 +183,7 @@ regs[] = {
 	{REG_COM7,0x00},
 	{ REG_RGB444,0x00},/* No RGB444 please */
 	{ REG_COM1, 0x00},
-//     { REG_COM15, COM15_R00FF  },
+
 	{ REG_COM9, 0x18 }, /* 4x gain ceiling; 0x8 is reserved bit */
 	{ 0x4f, 0x80  },    /* "matrix coefficient 1" */
 	{ 0x50, 0x80  },    /* "matrix coefficient 2" */
@@ -191,11 +191,6 @@ regs[] = {
 	{ 0x52, 0x22  },    /* "matrix coefficient 4" */
 	{ 0x53, 0x5e  },    /* "matrix coefficient 5" */
 	{ 0x54, 0x80  },    /* "matrix coefficient 6" */
-   //  { REG_COM13, COM13_GAMMA|COM13_UVSAT},
- //   {0x17,0x13}, {0x32,0x06},
-//    {0x18,0x01}, {0x32,(0x06<<3) |(0x06)},
-//    {0x19,0x02}, {0x32,0x02},
-//    {0x1a,0x7a}, {0x32,(0x02<<2) |(0x02)},
 
 	{ REG_HSTART, 0x13  },{ REG_HSTOP, 0x01  },
 	{ REG_HREF, 0x36  },{ REG_VSTART, 0x02  },
@@ -209,7 +204,7 @@ regs[] = {
 	{0xa2, 0x02 },{ REG_COM10, 0x0 },
 
 	{0x3a,0x0c},
-	{REG_COM13,0x00},{REG_COM15,0xc0},
+	{REG_COM13,0x00},{REG_COM15,0x80},
 
 	{0xff,0xff},
 
