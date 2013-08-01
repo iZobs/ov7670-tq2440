@@ -180,31 +180,38 @@ regs[] = {
  */
 	{ REG_CLKRC, 0x01 },	/* OV: clock scale (30 fps) */
 	{ REG_TSLB,  0x04 },	/* OV */
-
-     { REG_COM7, 0x00 },  /* Selects YUV mode */
-     { REG_RGB444,0x00},/* No RGB444 please */
-     { REG_COM1, 0x00},
+	{REG_COM7,0x00},
+	{ REG_RGB444,0x00},/* No RGB444 please */
+	{ REG_COM1, 0x00},
 //     { REG_COM15, COM15_R00FF  },
-     { REG_COM9, 0x18 }, /* 4x gain ceiling; 0x8 is reserved bit */
-     { 0x4f, 0x80  },    /* "matrix coefficient 1" */
-     { 0x50, 0x80  },    /* "matrix coefficient 2" */
-     { 0x51, 0x00  },   /* vb */
-     { 0x52, 0x22  },    /* "matrix coefficient 4" */
-     { 0x53, 0x5e  },    /* "matrix coefficient 5" */
-     { 0x54, 0x80  },    /* "matrix coefficient 6" */
+	{ REG_COM9, 0x18 }, /* 4x gain ceiling; 0x8 is reserved bit */
+	{ 0x4f, 0x80  },    /* "matrix coefficient 1" */
+	{ 0x50, 0x80  },    /* "matrix coefficient 2" */
+	{ 0x51, 0x00  },   /* vb */
+	{ 0x52, 0x22  },    /* "matrix coefficient 4" */
+	{ 0x53, 0x5e  },    /* "matrix coefficient 5" */
+	{ 0x54, 0x80  },    /* "matrix coefficient 6" */
    //  { REG_COM13, COM13_GAMMA|COM13_UVSAT},
+ //   {0x17,0x13}, {0x32,0x06},
+//    {0x18,0x01}, {0x32,(0x06<<3) |(0x06)},
+//    {0x19,0x02}, {0x32,0x02},
+//    {0x1a,0x7a}, {0x32,(0x02<<2) |(0x02)},
 
-    {0x11,0x01},{0x12,0x00},
-    {0x0c,0x00},{0x3e,0x00},
-    {0x70,0x80},{0x71,0x80},
-    {0x72,0x11},{0x73,0xf0},
-    {0xa2,0x02},
-    /* Mystery scaling numbers */
-    {0x3a,0x0c},
-    {REG_COM13,0x00},{REG_COM15,0xc0},
-     
+	{ REG_HSTART, 0x13  },{ REG_HSTOP, 0x01  },
+	{ REG_HREF, 0x36  },{ REG_VSTART, 0x02  },
+	{ REG_VSTOP, 0x7a  },{ REG_VREF, 0x0a  },
+	{ REG_COM3, 0 },	{ REG_COM14, 0 },
 
-   	{ 0xff, 0xff },	/* END MARKER */
+	{0x11,0x01},{0x12,0x00},
+	{0x0c,0x00},{0x3e,0x00},
+	{0x70, 0x00 },{ 0x71, 0x80},
+	{0x72, 0x11 },{ 0x73, 0xf0 },
+	{0xa2, 0x02 },{ REG_COM10, 0x0 },
+
+	{0x3a,0x0c},
+	{REG_COM13,0x00},{REG_COM15,0xc0},
+
+	{0xff,0xff},
 
 };
 
@@ -288,13 +295,13 @@ static struct ov7670_win_size {
 
 #define MIN_C_WIDTH		32
 #define MIN_C_HEIGHT		48
-#define MAX_C_WIDTH		1280
-#define MAX_C_HEIGHT		1024
+#define MAX_C_WIDTH		640
+#define MAX_C_HEIGHT		480
 
 #define MIN_P_WIDTH		32
 #define MIN_P_HEIGHT		48
-#define MAX_P_WIDTH		1280
-#define MAX_P_HEIGHT		1024
+#define MAX_P_WIDTH		640
+#define MAX_P_HEIGHT		480
 
 enum
 {
