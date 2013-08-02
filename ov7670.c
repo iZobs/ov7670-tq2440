@@ -311,7 +311,7 @@ static void __inline__ update_source_fmt_regs(struct ov7670_camif_dev * pdev)
 	cisrcfmt = (1<<31)					// ITU-R BT.601 YCbCr 8-bit mode
 		|(0<<30)				// CB,Cr value offset cntrol for YCbCr
 		|(pdev->srcHsize<<16)	// source image width
-		|(2<<14)				// input order is CbYCrY
+		|(0<<14)				// input order is CbYCrY
 		|(pdev->srcVsize<<0);	// source image height
 
 	iowrite32(cisrcfmt, S3C244X_CISRCFMT);
@@ -489,7 +489,7 @@ static void __inline__ update_target_wnd_regs(struct ov7670_camif_dev * pdev)
 	#if DEBUG_CAMIF
 	mdelay(1);
 	reciwdofst = ioread32(S3C244X_CIWDOFST);
-	printk(DEVICE_NAME"------------S3C244X_CIWDOFST is %x\n",reciwdofst);
+	printk(DEVICE_NAME"----------S3C244X_CIWDOFST is %x\n",reciwdofst);
 	#endif
 
 
@@ -965,6 +965,7 @@ static void stop_capture(struct ov7670_camif_dev * pdev)
 		ciprscctrl &= ~(1<<15);		// clear preview scaler start bit.
 		iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);
 
+
 		/* CIIMGCPT. */
 		iowrite32(0, S3C244X_CIIMGCPT);
 		pdev->state = CAMIF_STATE_READY;
@@ -1225,18 +1226,21 @@ static int start_capture(struct ov7670_camif_dev * pdev, int stream)
 	iowrite32(ciwdofst, S3C244X_CIWDOFST);
 	mdelay(1);
 
+        #if DEBUG_CAMIF
 	ciwdofst = ioread32(S3C244X_CIWDOFST);
-        #if DEBUG
 	printk(DEVICE_NAME"----------the S3C244X_CIWDOFST is %x\n",ciwdofst);
         #endif
 
-	ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
-        #if DEBUG
-	printk(DEVICE_NAME"--------the S3C244X_CIPRSCCTRL is %x\n",ciprscctrl);
-        #endif
-
+        ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
 	ciprscctrl |= 1<<15;    	// preview scaler start
 	iowrite32(ciprscctrl, S3C244X_CIPRSCCTRL);
+
+        #if DEBUG_CAMIF
+	mdelay(1);
+        ciprscctrl = ioread32(S3C244X_CIPRSCCTRL);
+	printk(DEVICE_NAME"-------in start capture, the S3C244X_CIPRSCCTRL is %x\n",ciprscctrl);
+        #endif
+
 
 	pdev->state = CAMIF_STATE_PREVIEWING;
 
