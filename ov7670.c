@@ -42,11 +42,13 @@
 #define CAMIF_INIT_FUNCTION      "In camif_init()"
 
 #define DEBUG 0
-#define DEBUG_CAMIF 1
+#define DEBUG_CAMIF 0
+#define DEBUG_WINDOW 1
 
 static unsigned has_ov7670;
 unsigned long camif_base_addr;
 static u8 update_cmaif_regs_flag = 0;
+static u32 frame_conut = 0;
 
 /* camera device(s) */
 static struct ov7670_camif_dev camera;
@@ -209,13 +211,14 @@ static u32 __inline__ show_ov7670_product_id(void)
 /*
  * Stuff that knows about the sensor.
  */
-
+/*
 static int  ov7670_reset(void)
 {
 	sccb_write(OV7670_SCCB_ADDR,REG_COM7,COM7_RESET);
 	msleep(1);
 	return 0;
 }
+*/
 
 //在这个函数中完成对ov7670寄存器的配置
 static void ov7670_init_defual_regs(void)
@@ -233,35 +236,6 @@ static void ov7670_init_defual_regs(void)
 		sccb_write(OV7670_SCCB_ADDR, regs[i].subaddr, regs[i].value);
 	}
 	up(&regs_mutex);
-}
-
-
-
-/*
- * Store a set of start/stop values into the camera.
- */
-static int ov7670_set_hw(int hstart, int hstop,
-		int vstart, int vstop)
-{
-	u8 v;
-/*
- * Horizontal: 11 bits, top 8 live in hstart and hstop.  Bottom 3 of
- * hstart are in href[2:0], bottom 3 of hstop in href[5:3].  There is
- * a mystery "edge offset" value in the top two bits of href.
- */
-	#if DEBUG
-	v = sccb_read(OV7670_SCCB_ADDR,REG_HREF);
-	printk(DEVICE_NAME"----the REG_HREF is:%x\n",v);
-	v = (v & 0xc0) | ((hstop & 0x7) << 3) | (hstart & 0x7);
-	msleep(10);
-	sccb_write(OV7670_SCCB_ADDR,REG_HREF, v);
-	msleep(10);
-
-	v = sccb_read(OV7670_SCCB_ADDR,REG_HREF);
-	printk(DEVICE_NAME"----the REG_HREF is:%x\n",v);
-
-	#endif
-	return v;
 }
 
 
@@ -1000,11 +974,11 @@ static irqreturn_t on_camif_irq_c(int irq, void * dev)
 {
 	u32 cicostatus;
 
-	u32 frame;
+	u32 frame = 0;
 	struct ov7670_camif_dev * pdev;
 
 	cicostatus = ioread32(S3C244X_CICOSTATUS);
-	#if DEBUG
+        #if DEBUG_CAMIF
 	printk("----on_camif_irq_c is call\n");
 	printk(DEVICE_NAME"----the S3C244X_CICOSTATUS is %x\n",cicostatus);
         #endif
@@ -1020,6 +994,12 @@ static irqreturn_t on_camif_irq_c(int irq, void * dev)
 	/* valid img_buff[x] just DMAed. */
 	frame = (cicostatus&(3<<26))>>26;
 	frame = (frame+4-1)%4;
+
+	#if DEBUG_CAMIF
+	printk(DEVICE_NAME"----in on_camif_irq_c,the frame is %d\n",frame);
+        #endif
+
+
 
 	/*pdev->cmdcode 在update_camif_config()中被赋值*/
 	if (pdev->cmdcode & CAMIF_CMD_STOP)
@@ -1069,8 +1049,8 @@ static irqreturn_t on_camif_irq_p(int irq, void * dev)
 	struct ov7670_camif_dev * pdev;
 	ciprstatus = ioread32(S3C244X_CIPRSTATUS);
 
-	#if DEBUG
-    printk(DEVICE_NAME"----------on camif_irq_p is called\n");
+	#if DEBUG_CAMIF
+        printk(DEVICE_NAME"----------on camif_irq_p is called\n");
 	printk(DEVICE_NAME"----the S3C244X_CIPRSTATUS is %x\n",ciprstatus);
         #endif
 
@@ -1087,6 +1067,14 @@ static irqreturn_t on_camif_irq_p(int irq, void * dev)
 	frame = (frame+4-1)%4;
 
 	img_buff[frame].state = CAMIF_BUFF_RGB565;
+
+	#if DEBUG_WINDOW
+
+	frame_conut = frame_conut +1;
+        printk(DEVICE_NAME"----------on camif_irq_p is called\n");
+	printk(DEVICE_NAME"----the frame is  %x,frame_count is %d\n",frame,frame_conut);
+        #endif
+
 
 	if (pdev->cmdcode & CAMIF_CMD_STOP)
 	{
@@ -1291,6 +1279,9 @@ static ssize_t camif_read(struct file *file, char __user *data, size_t count, lo
 		{
 		    copy_to_user(data, (void *)img_buff[i].virt_base, count); /*将img_buff的虚拟地址复制到user*/
 			img_buff[i].state = CAMIF_BUFF_INVALID;
+                       #if DEBUG_CAMIF
+			printk(DEVICE_NAME"----in camif_read img_buff[%d] is copy,count is %d\n",i,count);
+			#endif
 		}
 	}
 	enable_irq(IRQ_S3C2440_CAM_P);
@@ -1341,6 +1332,7 @@ static int __init camif_init(void)
 	s3c2410_gpio_cfgpin(S3C2440_GPJ7, S3C2440_GPJ7_CAMDATA7);
 	s3c2410_gpio_cfgpin(S3C2440_GPJ8, S3C2440_GPJ8_CAMPCLK);
 	s3c2410_gpio_cfgpin(S3C2440_GPJ9, S3C2440_GPJ9_CAMVSYNC);
+
 	s3c2410_gpio_cfgpin(S3C2440_GPJ10, S3C2440_GPJ10_CAMHREF);
 	s3c2410_gpio_cfgpin(S3C2440_GPJ11, S3C2440_GPJ11_CAMCLKOUT);
 	s3c2410_gpio_cfgpin(S3C2440_GPJ12, S3C2440_GPJ12_CAMRESET);
