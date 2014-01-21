@@ -1,1 +1,1 @@
-this the moudle of ov7670 for tq2440
+---This is an  ov7670 driver for tq2440,the test app is  `./app/ov7670_test.c`---
