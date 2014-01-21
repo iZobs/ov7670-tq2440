@@ -1,1 +1,0 @@
-cmd_/home/izobs/Linux_c/arm-ov7670/module/ov7670.ko := arm-linux-ld -EL -r   --build-id -o /home/izobs/Linux_c/arm-ov7670/module/ov7670.ko /home/izobs/Linux_c/arm-ov7670/module/ov7670.o /home/izobs/Linux_c/arm-ov7670/module/ov7670.mod.o
